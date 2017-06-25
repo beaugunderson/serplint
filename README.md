@@ -17,3 +17,11 @@ $ pip install git+https://github.com/ethereum/serpent.git@3ec98d01813167cc8725a9
 ```sh
 $ serplint filename.se
 ```
+
+### Integrations
+
+TODO:
+
+- neovim + neomake
+- vscode
+- sublime
