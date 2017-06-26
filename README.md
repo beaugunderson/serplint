@@ -2,6 +2,8 @@
 
 A linter for the [Serpent](https://github.com/ethereum/serpent) language.
 
+![screenshot](https://i.imgur.com/VXb7mtK.png)
+
 ### Installation
 
 Until a new release of Serpent is uploaded to PyPi it's necessary to install
