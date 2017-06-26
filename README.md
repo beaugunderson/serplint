@@ -18,6 +18,18 @@ $ pip install git+https://github.com/ethereum/serpent.git@3ec98d01813167cc8725a9
 $ serplint filename.se
 ```
 
+### Current tests
+
+- undefined variables
+
+### Planned tests
+
+- array index out of bounds
+- function parameter not used in function
+- function parameter shadowing
+- magic numbers
+- unused assignment
+
 ### Integrations
 
 TODO:
