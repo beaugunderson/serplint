@@ -34,7 +34,7 @@ $ serplint filename.se
 
 ### Integrations
 
-- [Sublime Text 3](https://packagecontrol.io/packages/SublimeLinter-contrib-serplint)
+- Sublime Text 3 [syntax](https://packagecontrol.io/packages/Serpent%20Syntax) and [linter](https://packagecontrol.io/packages/SublimeLinter-contrib-serplint)
 - [neovim + neovmake](https://github.com/neomake/neomake/blob/663e9a73ef7f1c666feffa7f70851fb559212db7/autoload/neomake/makers/ft/serpent.vim)
 
 ### TODO
