@@ -34,9 +34,9 @@ $ serplint filename.se
 
 ### Integrations
 
-- Sublime Text 3 (pull request pending)
-- neovim + neovmake (pull request pending)
+- [Sublime Text 3](https://packagecontrol.io/packages/SublimeLinter-contrib-serplint)
+- [neovim + neovmake](https://github.com/neomake/neomake/blob/663e9a73ef7f1c666feffa7f70851fb559212db7/autoload/neomake/makers/ft/serpent.vim)
 
-TODO:
+### TODO
 
-- vscode
+- Visual Studio Code
