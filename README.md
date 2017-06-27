@@ -34,8 +34,9 @@ $ serplint filename.se
 
 ### Integrations
 
+- Sublime Text 3 (pull request pending)
+- neovim + neovmake (pull request pending)
+
 TODO:
 
-- neovim + neomake
 - vscode
-- sublime
