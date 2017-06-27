@@ -12,6 +12,10 @@ from contextlib import contextmanager
 import click
 import serpent
 
+COMPILE_ERROR = 'E100'
+PARSE_ERROR = 'E101'
+UNDEFINED_VARIABLE = 'E200'
+
 
 def iterable(o):
     return isinstance(o, Iterable) and not isinstance(o, basestring)
@@ -63,6 +67,10 @@ def stdout_redirected(to=os.devnull, stdout=None):
 def merged_stderr_stdout():  # $ exec 2>&1
     return stdout_redirected(to=sys.stdout, stdout=sys.stderr)
 
+
+RE_EXCEPTION = re.compile(
+    r'line (?P<line>\d+), char (?P<character>\d+)\): (?P<message>.*)$',
+    re.IGNORECASE)
 
 GLOBALS = [
     'block.coinbase',
@@ -130,10 +138,18 @@ class Linter(object):
     def check(self, token, method_name):
         if (self.is_reference(token.name) and
                 not self.in_scope(token.name, method_name)):
-            print(
-                '{}:{} undefined variable "{}"'
-                .format(token.metadata.ln + 1, token.metadata.ch, token.name),
-                file=sys.stderr)
+            line = self.code_lines[token.metadata.ln]
+            match = re.match(r'(?P<space>\s+)', line)
+            offset = 0
+
+            if match:
+                offset = len(match.group('space'))
+
+            self.log_message(
+                token.metadata.ln + 1,
+                token.metadata.ch + 1 + offset,
+                UNDEFINED_VARIABLE,
+                'Undefined variable "{}"'.format(token.name))
 
     def simple_traversal(self, nodes, method_name):
         if not nodes:
@@ -353,7 +369,7 @@ class Linter(object):
 
             return
 
-        if self.verbose:
+        if self.debug:
             print('{}{} {}'.format(' ' * level, node.val,
                                    '' if isinstance(node, serpent.Token)
                                    else [n.val for n in node.args]))
@@ -362,7 +378,7 @@ class Linter(object):
             method_name = node.args[0].val
 
         if node.val not in self.mapping:
-            if self.is_opcode(node.val) and self.verbose:
+            if self.is_opcode(node.val) and self.debug:
                 print('{} unknown opcode {}'.format(node.metadata.ln + 1,
                                                     node.val))
         else:
@@ -374,9 +390,41 @@ class Linter(object):
                                   level=level + 1,
                                   method_name=method_name)
 
-    def __init__(self, verbose=False):
-        self.verbose = verbose
+    def log_message(self, line, character, error_code, message):
+        """
+        Log a linter message to stderr, ignoring duplicates.
+        """
+        if error_code[0] == 'E':
+            formatted_code = click.style(error_code, fg='red')
+        else:
+            formatted_code = click.style(error_code, fg='yellow')
 
+        message = '{}:{}:{} {} {}'.format(self.filename,
+                                          line,
+                                          character,
+                                          formatted_code,
+                                          message)
+
+        if message in self.logged_messages:
+            return
+
+        self.exit_code = 1
+        self.logged_messages.append(message)
+
+        click.echo(message)
+
+    def __init__(self, input_file, verbose=False, debug=False):
+        self.code = input_file.read()
+        self.code_lines = self.code.splitlines()
+
+        self.filename = input_file.name
+
+        self.verbose = verbose
+        self.debug = debug
+
+        self.exit_code = None
+
+        self.logged_messages = None
         self.scope = None
 
         self.data = None
@@ -385,7 +433,10 @@ class Linter(object):
         self.methods = None
         # self.structs = None
 
-    def lint(self, code):
+    def lint(self):
+        self.exit_code = 0
+
+        self.logged_messages = []
         self.scope = defaultdict(dict)
 
         self.data = []
@@ -432,31 +483,36 @@ class Linter(object):
 
         self.traverse(contract_ast)
 
-        if self.verbose:
+        if self.debug:
             from pprint import pformat
 
-            print('scope', pformat(self.scope.items()))
+            click.echo('scope ' + pformat(self.scope.items()))
 
-            print('data', pformat(self.data))
-            print('events', pformat(self.events))
-            print('macros', pformat(self.macros))
-            print('methods', pformat(self.methods))
-            # print('structs', pformat(self.structs))
+            click.echo('data ' + pformat(self.data))
+            click.echo('events ' + pformat(self.events))
+            click.echo('macros ' + pformat(self.macros))
+            click.echo('methods ' + pformat(self.methods))
+            # click.echo('structs', pformat(self.structs))
+
+        return self.exit_code
 
 
 @click.command()
-@click.option('--verbose', is_flag=True)
-@click.argument('filename')
-def serplint(verbose, filename):
+@click.option('--verbose', '-v', is_flag=True)
+@click.option('--debug', '-d', is_flag=True)
+@click.version_option()
+@click.argument('input_file', type=click.File('rb'))
+def serplint(verbose, debug, input_file):
     if verbose:
-        print('Linting {}'.format(filename))
+        print('Linting {}'.format(input_file.name))
         print()
 
-    linter = Linter(verbose=verbose)
+    linter = Linter(input_file, verbose=verbose, debug=debug)
+    exit_code = linter.lint()
 
-    with open(filename, 'r') as f:
-        linter.lint(f.read())
+    sys.exit(exit_code)
 
 
+# pylint: disable=no-value-for-parameter
 if __name__ == '__main__':
     serplint()
