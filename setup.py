@@ -20,7 +20,7 @@ setup(
     description='A linter for the serpent language',
     long_description_markdown_filename='README.md',
     keywords=['serpent', 'ethereum'],
-    version='1.0.4',
+    version='1.1.0',
     license='MIT',
     packages=find_packages(),
     py_modules=['serplint'],
