@@ -2,10 +2,12 @@
 
 from __future__ import print_function
 
+import os
 import re
 import sys
 
 from collections import defaultdict, Iterable
+from contextlib import contextmanager
 
 import click
 import serpent
@@ -22,6 +24,44 @@ def flatten(l):
                 yield sub
         else:
             yield el
+
+
+def fileno(file_or_fd):
+    fd = getattr(file_or_fd, 'fileno', lambda: file_or_fd)()
+
+    if not isinstance(fd, int):
+        raise ValueError("Expected a file (`.fileno()`) or a file descriptor")
+
+    return fd
+
+
+@contextmanager
+def stdout_redirected(to=os.devnull, stdout=None):
+    if stdout is None:
+        stdout = sys.stdout
+
+    stdout_fd = fileno(stdout)
+    # copy stdout_fd before it is overwritten
+    # NOTE: `copied` is inheritable on Windows when duplicating a standard
+    # stream
+    with os.fdopen(os.dup(stdout_fd), 'wb') as copied:
+        stdout.flush()  # flush library buffers that dup2 knows nothing about
+        try:
+            os.dup2(fileno(to), stdout_fd)  # $ exec >&to
+        except ValueError:  # filename
+            with open(to, 'wb') as to_file:
+                os.dup2(to_file.fileno(), stdout_fd)  # $ exec > to
+        try:
+            yield stdout  # allow code to be run with the redirected stdout
+        finally:
+            # restore stdout to its previous value
+            # NOTE: dup2 makes stdout_fd inheritable unconditionally
+            stdout.flush()
+            os.dup2(copied.fileno(), stdout_fd)  # $ exec >&copied
+
+
+def merged_stderr_stdout():  # $ exec 2>&1
+    return stdout_redirected(to=sys.stdout, stdout=sys.stderr)
 
 
 GLOBALS = [
@@ -354,9 +394,41 @@ class Linter(object):
         self.methods = []
         # self.structs = {}
 
-        serpent.compile(code)
+        # ('Error (file "main", line 2, char 12): Invalid argument count ...
+        try:
+            # override stdout since serpent tries to print the exception itself
+            with stdout_redirected(), merged_stderr_stdout():
+                serpent.compile(self.code)
+        except Exception as e:
+            match = RE_EXCEPTION.search(e.args[0])
 
-        contract_ast = serpent.parse(code)
+            if match:
+                self.log_message(match.group('line'),
+                                 match.group('character'),
+                                 COMPILE_ERROR,
+                                 match.group('message'))
+            else:
+                click.echo('Exception: {}'.format(e.args[0]), err=True)
+
+                sys.exit(1)
+
+        # ('Error (file "main", line 2, char 12): Invalid argument count ...
+        try:
+            # override stdout since serpent tries to print the exception itself
+            with stdout_redirected(), merged_stderr_stdout():
+                contract_ast = serpent.parse(self.code)
+        except Exception as e:
+            match = RE_EXCEPTION.search(e.args[0])
+
+            if match:
+                self.log_message(match.group('line'),
+                                 match.group('character'),
+                                 PARSE_ERROR,
+                                 match.group('message'))
+            else:
+                print('Exception: {}'.format(e.args[0]), err=True)
+
+            sys.exit(1)
 
         self.traverse(contract_ast)
 
