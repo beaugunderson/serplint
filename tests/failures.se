@@ -1,0 +1,35 @@
+event Event1(arg1:address:indexed)
+event Event2(arg1)
+
+data dataArray1[2**160]
+data dataArray2[2**160][2**160]
+data data1(arg1)
+
+def method1(arg1: uint256, arg2, arg3):
+    var1 = 10 + bad1
+    var2 = var1*2*4*6*var1*bad2
+    var3 = self.dataArray1[0]
+    var4 = self.dataArray2[0][0]
+    self.dataArray1[0] = 1
+    self.dataArray2[0][0] = 1
+    log(type=Event1)
+    log(type=Event2)
+    return(1: uint256)
+
+def method2(arg1):
+    var3 = 5 * self.method1(1, bad3, 3) * 4 * 'method1'
+    bad4 += 1
+    bad5 -= 1
+    return(1*2: uint256)
+
+macro MACRO_1: 100
+macro MACRO_2: bad6
+
+def method3():
+    return MACRO_1
+
+def method4():
+    return MACRO_2
+
+def method5():
+    return(bad7 + bad8: uint256)
