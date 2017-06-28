@@ -1,5 +1,20 @@
 data campaigns[2^80](recipient, goal, deadline, contrib_total, contrib_count, contribs[2^50](sender, value))
 
+# Clearing function for internal use
+def clear(id):
+    if self == msg.sender:
+        self.campaigns[id].recipient = 0
+        self.campaigns[id].goal = 0
+        self.campaigns[id].deadline = 0
+        c = self.campaigns[id].contrib_count
+        self.campaigns[id].contrib_count = 0
+        self.campaigns[id].contrib_total = 0
+        i = 0
+        while i < c:
+            self.campaigns[id].contribs[i].sender = 0
+            self.campaigns[id].contribs[i].value = 0
+            i += 1
+
 def create_campaign(id, recipient, goal, timelimit):
     if self.campaigns[id].recipient:
         return(0)
@@ -36,18 +51,3 @@ def contribute(id):
 
 def progress_report(id):
     return(self.campaigns[id].contrib_total)
-
-# Clearing function for internal use
-def clear(id):
-    if self == msg.sender:
-        self.campaigns[id].recipient = 0
-        self.campaigns[id].goal = 0
-        self.campaigns[id].deadline = 0
-        c = self.campaigns[id].contrib_count
-        self.campaigns[id].contrib_count = 0
-        self.campaigns[id].contrib_total = 0
-        i = 0
-        while i < c:
-            self.campaigns[id].contribs[i].sender = 0
-            self.campaigns[id].contribs[i].value = 0
-            i += 1

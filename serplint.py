@@ -12,6 +12,12 @@ from contextlib import contextmanager
 import click
 import serpent
 
+# def init():   executed upon contract creation, accepts no parameters
+# def shared(): executed before running init and user functions
+# def any():    executed before any user functions
+
+# ensure things like self.controller are initialized?
+
 COMPILE_ERROR = 'E100'
 PARSE_ERROR = 'E101'
 UNDEFINED_VARIABLE = 'E200'
@@ -89,29 +95,22 @@ GLOBALS = [
     'self.balance',
     'self.storage',
     'tx.gasprice',
-    'x.balance',
+]
+
+KEYWORDS = [
+    'data',
+    'event',
 ]
 
 BUILTINS = [
     'calldatacopy',
     'calldataload',
-    'data',
     'div',
-    'event',
     'log',
     'send',  # TODO verify
     'string',
     '~invalid',
 ]
-
-
-# TODO shadowing/redefinition
-#
-# def init(): - executed upon contract creation, accepts no parameters
-# def shared(): - executed before running init and user functions
-# def any(): - executed before any user functions
-
-# ensure things like self.controller are initialized?
 
 
 class Token(object):
@@ -128,29 +127,33 @@ class Linter(object):
 
     @staticmethod
     def is_reference(value):
-        return (re.match('^[a-z]', value, re.IGNORECASE) and
-                value not in GLOBALS and
-                value not in BUILTINS)
+        return re.match('^[a-z]', value, re.IGNORECASE)
 
     @staticmethod
     def is_opcode(value):
         return (re.match('^[^0-9]', value) and
                 value not in GLOBALS and
+                value not in KEYWORDS and
                 value not in BUILTINS)
 
     def get_scope(self, method_name, name):
         if method_name in self.scope and name in self.scope[method_name]:
             return self.scope[method_name][name]
 
+    def resolve_name(self, node, method_name):
+        if isinstance(node, str):
+            return node
+
+        if isinstance(node, serpent.Astnode):
+            return self.resolve_access(node, method_name)
+
+        if isinstance(node, serpent.Token):
+            return node.val
+
+        return '__unknown__'
+
     def add_to_scope(self, method_name, token, variable_type):
-        if isinstance(token, str):
-            name = token
-        elif isinstance(token, serpent.Astnode):
-            name = self.resolve_access(token)
-        elif isinstance(token, serpent.Token):
-            name = token.val
-        else:
-            name = 'unknown'
+        name = self.resolve_name(token, method_name)
 
         if self.get_scope(method_name, name):
             if self.get_scope(method_name, name)['type'] == 'argument':
@@ -200,7 +203,7 @@ class Linter(object):
         if not nodes:
             return
 
-        for token in self.gather_tokens(nodes):
+        for token in self.gather_tokens(nodes, method_name):
             self.check(token, method_name)
 
     def conditional_traversal(self, node, method_name):
@@ -218,7 +221,7 @@ class Linter(object):
 
     def assignment(self, node, method_name):
         assignee = node.args[0]
-        assignee_name = self.resolve_access(node)
+        assignee_name = self.resolve_name(node.args[0], method_name)
 
         if self.is_reference(assignee_name):
             if assignee_name in self.data:
@@ -226,7 +229,7 @@ class Linter(object):
             else:
                 self.add_to_scope(method_name, assignee, 'assignment')
 
-        for token in self.gather_tokens(node.args[1:]):
+        for token in self.gather_tokens(node.args[1:], method_name):
             self.check(token, method_name)
 
     def return_type(self, node, method_name):
@@ -235,12 +238,23 @@ class Linter(object):
 
         self.simple_traversal(return_value, method_name)
 
-    def resolve_access(self, node):
-        if node.args[0].val == 'access' and len(node.args[0].args) >= 2:
-            return self.resolve_access(node.args[0])
+    def resolve_access(self, node, method_name):
+        if isinstance(node, serpent.Token):
+            return node.val
 
-        if node.args[0].val == '.':
-            return '.'.join(a.val for a in node.args[0].args)
+        if (node.val == 'access' and
+                len(node.args) > 1 and
+                self.is_reference(node.args[1].val)):
+            self.check(Token(self.resolve_access(node.args[1], method_name),
+                             node.args[1].metadata),
+                       method_name)
+
+        if node.val == 'access' and len(node.args) > 1:
+            return self.resolve_access(node.args[0], method_name)
+
+        if node.val == '.':
+            return '.'.join(self.resolve_name(arg, method_name)
+                            for arg in node.args)
 
         return node.args[0].val
 
@@ -253,19 +267,32 @@ class Linter(object):
 
         return node.args[0]
 
-    def define_data(self, node, *args):
-        # struct
-        if node.args[0].val == 'fun':
-            name = 'self.{}'.format(self.resolve_access(node.args[0].args[0]))
+    def define_data(self, node, method_name, prefix=None):
+        fun_node = None
+
+        if node.val == 'fun':
+            fun_node = node
+        elif node.args[0].val == 'fun':
+            fun_node = node.args[0]
+
+        if fun_node:
+            name = '{}.{}'.format(
+                prefix or 'self',
+                self.resolve_access(fun_node.args[0], method_name))
 
             self.data.append(name)
 
-            for field in node.args[0].args[1:]:
-                self.data.append('{}.{}'.format(name, field.val))
+            for field in fun_node.args[1:]:
+                if field.val == 'fun':
+                    self.define_data(field, method_name, prefix=name)
+                else:
+                    self.data.append('{}.{}'.format(name, field.val))
 
             # self.structs[name] = node.args[0].args[1:]
         else:
-            self.data.append('self.{}'.format(self.resolve_access(node)))
+            self.data.append('{}.{}'.format(
+                prefix or 'self',
+                self.resolve_access(node.args[0], method_name)))
 
     def define_event(self, node, method_name):
         self.events.append(node.args[0].val)
@@ -377,39 +404,41 @@ class Linter(object):
 
         return False
 
-    def gather_tokens(self, nodes):
+    def gather_tokens(self, nodes, method_name):
         if not nodes:
-            return
+            return []
 
         if not iterable(nodes):
             nodes = [nodes]
 
-        collected_nodes = flatten(self.traverse_tokens(node) for node in nodes)
+        collected_nodes = list(
+            flatten(self.traverse_tokens(node, method_name) for node in nodes))
 
-        return (set(pair for pair in collected_nodes if pair)
-                if collected_nodes
-                else None)
+        if collected_nodes:
+            return set(pair for pair in collected_nodes if pair)
 
-    def resolve_token(self, node):
+        return []
+
+    def resolve_token(self, node, method_name):
         if isinstance(node, serpent.Token):
             return node.val
 
-        return self.resolve_access(node)
+        return self.resolve_access(node, method_name)
 
-    def traverse_tokens(self, node):
+    def traverse_tokens(self, node, method_name):
         if node.val == '.':
-            return Token('.'.join(self.resolve_token(a) for a in node.args),
-                         node.metadata)
+            return Token('.'.join(self.resolve_token(a, method_name)
+                                  for a in node.args), node.metadata)
 
         if node.val == ':':
-            return self.traverse_tokens(node.args[0])
+            return self.traverse_tokens(node.args[0], method_name)
 
         if isinstance(node, serpent.Token):
             return (Token(node.val, node.metadata)
                     if self.is_reference(node.val)
                     else None)
 
-        return [self.traverse_tokens(arg) for arg in node.args]
+        return [self.traverse_tokens(arg, method_name) for arg in node.args]
 
     def traverse(self, node, level=0, method_name=None):
         if not isinstance(node, serpent.Astnode):
@@ -419,17 +448,17 @@ class Linter(object):
             return
 
         if self.debug:
-            print('{}{} {}'.format(' ' * level, node.val,
-                                   '' if isinstance(node, serpent.Token)
-                                   else [n.val for n in node.args]))
+            click.echo('{}{} {}'.format(' ' * level, node.val,
+                                        '' if isinstance(node, serpent.Token)
+                                        else [n.val for n in node.args]))
 
         if node.val == 'def':
             method_name = node.args[0].val
 
         if node.val not in self.mapping:
             if self.is_opcode(node.val) and self.debug:
-                print('{} unknown opcode {}'.format(node.metadata.ln + 1,
-                                                    node.val))
+                click.echo('{} unknown opcode {}'.format(node.metadata.ln + 1,
+                                                         node.val))
         else:
             nodes_to_traverse = self.mapping[node.val](self, node, method_name)
 
@@ -531,7 +560,7 @@ class Linter(object):
                                  match.group('message'),
                                  reposition=False)
             else:
-                print('Exception: {}'.format(e.args[0]), err=True)
+                click.echo('Exception: {}'.format(e.args[0]), err=True)
 
             sys.exit(1)
 
@@ -549,7 +578,8 @@ class Linter(object):
                             metadata['token'].metadata.ch,
                             UNUSED_ARGUMENT,
                             'Unused argument "{}"'.format(variable))
-                    elif metadata['type'] == 'assignment':
+                    elif (metadata['type'] == 'assignment' and
+                            variable not in GLOBALS):
                         self.log_message(
                             metadata['token'].metadata.ln,
                             metadata['token'].metadata.ch,
@@ -577,8 +607,8 @@ class Linter(object):
 @click.argument('input_file', type=click.File('rb'))
 def serplint(verbose, debug, input_file):
     if verbose:
-        print('Linting {}'.format(input_file.name))
-        print()
+        click.echo('Linting {}'.format(input_file.name))
+        click.echo()
 
     linter = Linter(input_file, verbose=verbose, debug=debug)
     exit_code = linter.lint()
