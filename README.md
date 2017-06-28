@@ -23,14 +23,15 @@ $ serplint filename.se
 ### Current tests
 
 - undefined variables
+- reassigned arguments
+- unused arguments
+- unused assignment
 
 ### Planned tests
 
 - array index out of bounds
-- function parameter not used in function
-- function parameter shadowing
+- data and event shadowing
 - magic numbers
-- unused assignment
 
 ### Integrations
 

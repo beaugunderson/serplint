@@ -15,6 +15,9 @@ import serpent
 COMPILE_ERROR = 'E100'
 PARSE_ERROR = 'E101'
 UNDEFINED_VARIABLE = 'E200'
+ASSIGNED_TO_ARGUMENT = 'E201'
+UNUSED_ARGUMENT = 'W202'
+UNREFERENCED_ASSIGNMENT = 'W203'
 
 
 def iterable(o):
@@ -135,21 +138,63 @@ class Linter(object):
                 value not in GLOBALS and
                 value not in BUILTINS)
 
+    def get_scope(self, method_name, name):
+        if method_name in self.scope and name in self.scope[method_name]:
+            return self.scope[method_name][name]
+
+    def add_to_scope(self, method_name, token, variable_type):
+        if isinstance(token, str):
+            name = token
+        elif isinstance(token, serpent.Astnode):
+            name = self.resolve_access(token)
+        elif isinstance(token, serpent.Token):
+            name = token.val
+        else:
+            name = 'unknown'
+
+        if self.get_scope(method_name, name):
+            if self.get_scope(method_name, name)['type'] == 'argument':
+                self.log_message(
+                    token.metadata.ln,
+                    token.metadata.ch,
+                    ASSIGNED_TO_ARGUMENT,
+                    'Assigned a value to an argument "{}"'.format(name))
+
+        self.scope[method_name][name] = {
+            'type': variable_type,
+            'accessed': False,
+            'token': token,
+        }
+
+    def reposition(self, line, character):
+        """
+        Needed because of a bug in how the Serpent AST calculates offset (it
+        ignores starting whitespace)
+        """
+        match = re.match(r'(?P<space>\s+)', self.code_lines[line])
+        offset = 0
+
+        if match:
+            offset = len(match.group('space'))
+
+        return (line + 1,
+                character + 1 + offset)
+
     def check(self, token, method_name):
-        if (self.is_reference(token.name) and
-                not self.in_scope(token.name, method_name)):
-            line = self.code_lines[token.metadata.ln]
-            match = re.match(r'(?P<space>\s+)', line)
-            offset = 0
+        if not self.is_reference(token.name):
+            return
 
-            if match:
-                offset = len(match.group('space'))
-
+        if not self.in_scope(token.name, method_name):
             self.log_message(
-                token.metadata.ln + 1,
-                token.metadata.ch + 1 + offset,
+                token.metadata.ln,
+                token.metadata.ch,
                 UNDEFINED_VARIABLE,
                 'Undefined variable "{}"'.format(token.name))
+        else:
+            scope = self.get_scope(method_name, token.name)
+
+            if scope:
+                scope['accessed'] = True
 
     def simple_traversal(self, nodes, method_name):
         if not nodes:
@@ -172,10 +217,14 @@ class Linter(object):
         return node.args
 
     def assignment(self, node, method_name):
-        token = node.args[0].val
+        assignee = node.args[0]
+        assignee_name = self.resolve_access(node)
 
-        if self.is_reference(token):
-            self.scope[method_name][token] = 'assignment'
+        if self.is_reference(assignee_name):
+            if assignee_name in self.data:
+                self.add_to_scope(method_name, assignee, 'data_assignment')
+            else:
+                self.add_to_scope(method_name, assignee, 'assignment')
 
         for token in self.gather_tokens(node.args[1:]):
             self.check(token, method_name)
@@ -197,12 +246,12 @@ class Linter(object):
 
     def resolve_argument(self, node):
         if isinstance(node, serpent.Token) or not node.args:
-            return node.val
+            return node
 
         if node.args[0].val == ':':
-            return node.args[0].args[0].val
+            return node.args[0].args[0]
 
-        return node.args[0].val
+        return node.args[0]
 
     def define_data(self, node, *args):
         # struct
@@ -239,7 +288,7 @@ class Linter(object):
         self.methods.append('self.{}'.format(name))
 
         for token in [self.resolve_argument(arg) for arg in arguments]:
-            self.scope[name][token] = 'argument'
+            self.add_to_scope(name, token, 'argument')
 
         if node.args[1].val in self.mapping:
             return [node.args[1]]
@@ -315,15 +364,15 @@ class Linter(object):
         'seq': always_traverse,
     }
 
-    def in_scope(self, token, method_name):
-        if (token in self.scope[method_name] or
-                token in self.data or
-                token in self.events or
-                token in self.macros or
-                token in self.methods):
+    def in_scope(self, name, method_name):
+        if (name in self.scope[method_name] or
+                name in self.data or
+                name in self.events or
+                name in self.macros or
+                name in self.methods):
             return True
 
-        if token in BUILTINS or token in GLOBALS:
+        if name in BUILTINS or name in GLOBALS:
             return True
 
         return False
@@ -390,14 +439,17 @@ class Linter(object):
                                   level=level + 1,
                                   method_name=method_name)
 
-    def log_message(self, line, character, error_code, message):
+    def log_message(self, line, character, error, message, reposition=True):
         """
         Log a linter message to stderr, ignoring duplicates.
         """
-        if error_code[0] == 'E':
-            formatted_code = click.style(error_code, fg='red')
+        if error[0] == 'E':
+            formatted_code = click.style(error, fg='red')
         else:
-            formatted_code = click.style(error_code, fg='yellow')
+            formatted_code = click.style(error, fg='yellow')
+
+        if reposition:
+            line, character = self.reposition(line, character)
 
         message = '{}:{}:{} {} {}'.format(self.filename,
                                           line,
@@ -457,7 +509,8 @@ class Linter(object):
                 self.log_message(match.group('line'),
                                  match.group('character'),
                                  COMPILE_ERROR,
-                                 match.group('message'))
+                                 match.group('message'),
+                                 reposition=False)
             else:
                 click.echo('Exception: {}'.format(e.args[0]), err=True)
 
@@ -475,13 +528,33 @@ class Linter(object):
                 self.log_message(match.group('line'),
                                  match.group('character'),
                                  PARSE_ERROR,
-                                 match.group('message'))
+                                 match.group('message'),
+                                 reposition=False)
             else:
                 print('Exception: {}'.format(e.args[0]), err=True)
 
             sys.exit(1)
 
         self.traverse(contract_ast)
+
+        for method, variables in self.scope.items():
+            if not method:
+                continue
+
+            for variable, metadata in variables.items():
+                if not metadata['accessed']:
+                    if metadata['type'] == 'argument':
+                        self.log_message(
+                            metadata['token'].metadata.ln,
+                            metadata['token'].metadata.ch,
+                            UNUSED_ARGUMENT,
+                            'Unused argument "{}"'.format(variable))
+                    elif metadata['type'] == 'assignment':
+                        self.log_message(
+                            metadata['token'].metadata.ln,
+                            metadata['token'].metadata.ch,
+                            UNREFERENCED_ASSIGNMENT,
+                            'Unreferenced assignment "{}"'.format(variable))
 
         if self.debug:
             from pprint import pformat

@@ -10,7 +10,7 @@ def method1(arg1: uint256, arg2, arg3):
     var2 = var1*2*4*6*var1*bad2
     var3 = self.dataArray1[0]
     var4 = self.dataArray2[0][0]
-    self.dataArray1[0] = 1
+    self.dataArray1[0] = var2+var3+var4
     self.dataArray2[0][0] = 1
     log(type=Event1)
     log(type=Event2)
@@ -33,3 +33,6 @@ def method4():
 
 def method5():
     return(bad7 + bad8: uint256)
+
+def method6(arg1):
+    arg1 = 5
