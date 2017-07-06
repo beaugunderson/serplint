@@ -20,7 +20,7 @@ setup(
     description='A linter for the serpent language',
     long_description_markdown_filename='README.md',
     keywords=['serpent', 'ethereum'],
-    version='1.2.1',
+    version='1.3.0',
     license='MIT',
     packages=find_packages(),
     py_modules=['serplint'],
@@ -31,11 +31,7 @@ setup(
     },
     install_requires=[
         'click==6.7',
-        'ethereum-serpent==2.0.2',
-    ],
-    dependency_links=[
-        ('git+https://github.com/ethereum/serpent.git@'
-         '3ec98d01813167cc8725a951bd384c629158af2b#egg=ethereum-serpent-2.0.2'),
+        'ethereum-serpent-augur-temp==2.0.2',
     ],
     setup_requires=setup_requires,
     classifiers=[

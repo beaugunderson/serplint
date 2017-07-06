@@ -4,5 +4,5 @@
 #
 #    pip-compile --output-file requirements.txt requirements.in
 #
--e git+https://github.com/ethereum/serpent.git@3ec98d01813167cc8725a951bd384c629158af2b#egg=ethereum-serpent
 click==6.7
+ethereum-serpent-augur-temp==2.0.2

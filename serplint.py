@@ -603,9 +603,10 @@ class Linter(object):
 @click.command()
 @click.option('--verbose', '-v', is_flag=True)
 @click.option('--debug', '-d', is_flag=True)
+@click.option('--exit-status', '-e', is_flag=True)
 @click.version_option()
 @click.argument('input_file', type=click.File('rb'))
-def serplint(verbose, debug, input_file):
+def serplint(verbose, debug, input_file, exit_status):
     if verbose:
         click.echo('Linting {}'.format(input_file.name))
         click.echo()
@@ -613,7 +614,8 @@ def serplint(verbose, debug, input_file):
     linter = Linter(input_file, verbose=verbose, debug=debug)
     exit_code = linter.lint()
 
-    sys.exit(exit_code)
+    if exit_status:
+        sys.exit(exit_code)
 
 
 # pylint: disable=no-value-for-parameter
