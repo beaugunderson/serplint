@@ -249,7 +249,7 @@ class Linter(object):
                              node.args[1].metadata),
                        method_name)
 
-        if node.val == 'access' and len(node.args) > 1:
+        if node.val == 'access':
             return self.resolve_access(node.args[0], method_name)
 
         if node.val == '.':
@@ -286,7 +286,8 @@ class Linter(object):
                 if field.val == 'fun':
                     self.define_data(field, method_name, prefix=name)
                 else:
-                    self.data.append('{}.{}'.format(name, field.val))
+                    self.data.append('{}.{}'.format(
+                        name, self.resolve_access(field, method_name)))
 
             # self.structs[name] = node.args[0].args[1:]
         else:
