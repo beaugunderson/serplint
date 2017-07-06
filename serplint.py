@@ -18,12 +18,13 @@ import serpent
 
 # ensure things like self.controller are initialized?
 
+ASSIGNED_TO_ARGUMENT = 'E201'
 COMPILE_ERROR = 'E100'
+INVALID_KEYWORD_ARGUMENT = 'E202'
 PARSE_ERROR = 'E101'
 UNDEFINED_VARIABLE = 'E200'
-ASSIGNED_TO_ARGUMENT = 'E201'
-UNUSED_ARGUMENT = 'W202'
 UNREFERENCED_ASSIGNMENT = 'W203'
+UNUSED_ARGUMENT = 'W202'
 
 
 def iterable(o):
@@ -107,9 +108,15 @@ BUILTINS = [
     'calldataload',
     'div',
     'log',
+    'return',
     'send',  # TODO verify
     'string',
     '~invalid',
+]
+
+BUILTIN_KEYWORD_ARGUMENTS = [
+    'items',
+    'outitems',
 ]
 
 
@@ -118,6 +125,10 @@ class Token(object):
     def __init__(self, name, metadata):
         self.name = name
         self.metadata = metadata
+
+    def __str__(self):
+        return 'Token({}, {}:{})'.format(
+            self.name, self.metadata.ln, self.metadata.ch)
 
     def __eq__(self, y):
         return self.name == y.name and self.metadata.ln == y.metadata.ln
@@ -187,17 +198,21 @@ class Linter(object):
         if not self.is_reference(token.name):
             return
 
-        if not self.in_scope(token.name, method_name):
-            self.log_message(
-                token.metadata.ln,
-                token.metadata.ch,
-                UNDEFINED_VARIABLE,
-                'Undefined variable "{}"'.format(token.name))
-        else:
-            scope = self.get_scope(method_name, token.name)
+        self.checks.append((token, method_name))
 
-            if scope:
-                scope['accessed'] = True
+    def resolve_checks(self):
+        for token, method_name in self.checks:
+            if not self.in_scope(token.name, method_name):
+                self.log_message(
+                    token.metadata.ln,
+                    token.metadata.ch,
+                    UNDEFINED_VARIABLE,
+                    'Undefined variable "{}"'.format(token.name))
+            else:
+                scope = self.get_scope(method_name, token.name)
+
+                if scope:
+                    scope['accessed'] = True
 
     def simple_traversal(self, nodes, method_name):
         if not nodes:
@@ -405,6 +420,12 @@ class Linter(object):
 
         return False
 
+    def resolve_token(self, node, method_name):
+        if isinstance(node, serpent.Token):
+            return node.val
+
+        return self.resolve_access(node, method_name)
+
     def gather_tokens(self, nodes, method_name):
         if not nodes:
             return []
@@ -420,12 +441,6 @@ class Linter(object):
 
         return []
 
-    def resolve_token(self, node, method_name):
-        if isinstance(node, serpent.Token):
-            return node.val
-
-        return self.resolve_access(node, method_name)
-
     def traverse_tokens(self, node, method_name):
         if node.val == '.':
             return Token('.'.join(self.resolve_token(a, method_name)
@@ -433,6 +448,19 @@ class Linter(object):
 
         if node.val == ':':
             return self.traverse_tokens(node.args[0], method_name)
+
+        if node.val == '=':
+            assignee = node.args[0]
+            value = node.args[1]
+
+            if assignee.val not in BUILTIN_KEYWORD_ARGUMENTS:
+                self.log_message(
+                    assignee.metadata.ln,
+                    assignee.metadata.ch,
+                    INVALID_KEYWORD_ARGUMENT,
+                    'Invalid keyword argument "{}"'.format(assignee.val))
+
+            return self.traverse_tokens(value, method_name)
 
         if isinstance(node, serpent.Token):
             return (Token(node.val, node.metadata)
@@ -456,18 +484,24 @@ class Linter(object):
         if node.val == 'def':
             method_name = node.args[0].val
 
-        if node.val not in self.mapping:
+        if (node.val not in self.mapping and
+                node.val not in self.macros + self.methods):
             if self.is_opcode(node.val) and self.debug:
                 click.echo('{} unknown opcode {}'.format(node.metadata.ln + 1,
                                                          node.val))
-        else:
-            nodes_to_traverse = self.mapping[node.val](self, node, method_name)
 
-            if nodes_to_traverse:
-                for node_to_traverse in nodes_to_traverse:
-                    self.traverse(node_to_traverse,
-                                  level=level + 1,
-                                  method_name=method_name)
+            return
+
+        if node.val in self.mapping:
+            nodes_to_traverse = self.mapping[node.val](self, node, method_name)
+        elif node.val in self.methods + self.macros:
+            nodes_to_traverse = self.simple_traversal(node, method_name)
+
+        if nodes_to_traverse:
+            for node_to_traverse in nodes_to_traverse:
+                self.traverse(node_to_traverse,
+                              level=level + 1,
+                              method_name=method_name)
 
     def log_message(self, line, character, error, message, reposition=True):
         """
@@ -506,6 +540,7 @@ class Linter(object):
 
         self.exit_code = None
 
+        self.checks = None
         self.logged_messages = None
         self.scope = None
 
@@ -518,6 +553,7 @@ class Linter(object):
     def lint(self):
         self.exit_code = 0
 
+        self.checks = []
         self.logged_messages = []
         self.scope = defaultdict(dict)
 
@@ -566,6 +602,8 @@ class Linter(object):
             sys.exit(1)
 
         self.traverse(contract_ast)
+
+        self.resolve_checks()
 
         for method, variables in self.scope.items():
             if not method:
